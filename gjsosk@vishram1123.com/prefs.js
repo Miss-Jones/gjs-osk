@@ -189,16 +189,23 @@ function generateStaticSVG(layoutData) {
         if (left != null) {
             left.add_style_class_name("boxLay");
             right.add_style_class_name("boxLay");
-            var mvL = 2 * topBtnWidth, mvR = 2 * topBtnWidth;
+            var mvL = 0, mvR = 0;
             if (lastRow.settings) {
                 var sb = new St.Button({ x_expand: true, y_expand: true });
                 sb.add_style_class_name("key");
                 gridLeft.attach(sb, 0, 0, 2 * topBtnWidth, 3); self.keys.push(sb);
-            } else mvL = 0;
+                mvL = 2 * topBtnWidth;
+            }
             if (lastRow.close) {
                 var cb = new St.Button({ x_expand: true, y_expand: true }); cb.add_style_class_name("key");
-                gridRight.attach(cb, rowSize - 2 * topBtnWidth - halfSize + 1, 0, 2 * topBtnWidth, 3); self.keys.push(cb);
-            } else mvR = 0;
+                mvR += 2 * topBtnWidth;
+                gridRight.attach(cb, rowSize - mvR - halfSize + 1, 0, 2 * topBtnWidth, 3); self.keys.push(cb);
+            }
+            if (lastRow.layoutToggle) {
+                var ltb = new St.Button({ x_expand: true, y_expand: true }); ltb.add_style_class_name("key");
+                mvR += 2 * topBtnWidth;
+                gridRight.attach(ltb, rowSize - mvR - halfSize + 1, 0, 2 * topBtnWidth, 3); self.keys.push(ltb);
+            }
             var mhL = new St.Button({ x_expand: true, y_expand: true });
             mhL.add_style_class_name("key");
             gridLeft.attach(mhL, mvL, 0, halfSize - mvL, 3);
@@ -206,15 +213,22 @@ function generateStaticSVG(layoutData) {
             gridRight.attach(mhR, 1, 0, rowSize - halfSize - mvR, 3);
         } else {
             this.box.add_style_class_name("boxLay");
-            var mvL2 = 2 * topBtnWidth, mvR2 = 2 * topBtnWidth;
+            var mvL2 = 0, mvR2 = 0;
             if (lastRow.settings) {
                 var sb2 = new St.Button({ x_expand: true, y_expand: true }); sb2.add_style_class_name("key");
                 grid.attach(sb2, 0, 0, 2 * topBtnWidth, 3); self.keys.push(sb2);
-            } else mvL2 = 0;
+                mvL2 = 2 * topBtnWidth;
+            }
             if (lastRow.close) {
                 var cb2 = new St.Button({ x_expand: true, y_expand: true }); cb2.add_style_class_name("key");
-                grid.attach(cb2, rowSize - 2 * topBtnWidth, 0, 2 * topBtnWidth, 3); self.keys.push(cb2);
-            } else mvR2 = 0;
+                mvR2 += 2 * topBtnWidth;
+                grid.attach(cb2, rowSize - mvR2, 0, 2 * topBtnWidth, 3); self.keys.push(cb2);
+            }
+            if (lastRow.layoutToggle) {
+                var ltb2 = new St.Button({ x_expand: true, y_expand: true }); ltb2.add_style_class_name("key");
+                mvR2 += 2 * topBtnWidth;
+                grid.attach(ltb2, rowSize - mvR2, 0, 2 * topBtnWidth, 3); self.keys.push(ltb2);
+            }
             var mhM = new St.Button({ x_expand: true, y_expand: true }); mhM.add_style_class_name("key");
             grid.attach(mhM, mvL2, 0, rowSize - mvL2 - mvR2, 3);
         }
@@ -433,6 +447,26 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         layoutPortraitRow.add_suffix(layoutPortraitDrop);
         layoutPortraitRow.activatable_widget = layoutPortraitDrop;
 
+        const layoutAltLandscapeRow = new Adw.ActionRow({
+            title: _('Landscape Alternate Layout (Toggle)')
+        });
+        layoutRow.add_row(layoutAltLandscapeRow);
+
+        let layoutAltLandscapeDrop = Gtk.DropDown.new_from_strings(layoutList);
+        layoutAltLandscapeDrop.valign = Gtk.Align.CENTER;
+        layoutAltLandscapeDrop.selected = Math.max(0, layoutList.indexOf(settings.get_string("layout-toggle-alt-landscape")));
+        layoutAltLandscapeRow.add_suffix(layoutAltLandscapeDrop);
+
+        const layoutAltPortraitRow = new Adw.ActionRow({
+            title: _('Portrait Alternate Layout (Toggle)')
+        });
+        layoutRow.add_row(layoutAltPortraitRow);
+
+        let layoutAltPortraitDrop = Gtk.DropDown.new_from_strings(layoutList);
+        layoutAltPortraitDrop.valign = Gtk.Align.CENTER;
+        layoutAltPortraitDrop.selected = Math.max(0, layoutList.indexOf(settings.get_string("layout-toggle-alt-portrait")));
+        layoutAltPortraitRow.add_suffix(layoutAltPortraitDrop);
+
         const portraitSizing = new Adw.ExpanderRow({
             title: _('Portrait Sizing')
         });
@@ -525,6 +559,18 @@ export default class GjsOskPreferences extends ExtensionPreferences {
 
         indEnabledRow.add_suffix(indEnabled);
         indEnabledRow.activatable_widget = indEnabled;
+
+        const layoutToggleEnableRow = new Adw.ActionRow({
+            title: _('Enable Layout Toggle Button')
+        });
+        behaviorGroup.add(layoutToggleEnableRow);
+
+        const layoutToggleEnableDT = new Gtk.Switch({
+            active: settings.get_boolean('enable-layout-toggle-button'),
+            valign: Gtk.Align.CENTER,
+        });
+        layoutToggleEnableRow.add_suffix(layoutToggleEnableDT);
+        layoutToggleEnableRow.activatable_widget = layoutToggleEnableDT;
 
         const enableKeyRepeatRow = new Adw.ActionRow({
             title: _('Enable Key Repeat for All Keys')
@@ -651,9 +697,11 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         let currentMonitorMap = {};
         let currentMonitors;
         if (settings.get_string("default-monitor").includes(";")) {
-            currentMonitors = settings.get_string("default-monitor").split(";")
+            currentMonitors = settings.get_string("default-monitor").split(";");
+        } else if (monitors.length > 0) {
+            currentMonitors = [("1:" + monitors[0].get_connector())];
         } else {
-            currentMonitors = [("1:" + monitors[0].get_connector())]
+            currentMonitors = [];
         }
 
         for (var i of currentMonitors) {
@@ -661,8 +709,12 @@ export default class GjsOskPreferences extends ExtensionPreferences {
             currentMonitorMap[tmp[0]] = tmp[1] + "";
         }
         if (!Object.keys(currentMonitorMap).includes(monitors.length + "")) {
-            let allConfigs = Object.keys(currentMonitorMap).map(Number.parseInt).sort();
-            currentMonitorMap[monitors.length + ""] = allConfigs[allConfigs.length - 1];
+            let allConfigs = Object.keys(currentMonitorMap).map(s => parseInt(s)).sort((a, b) => a - b);
+            if (allConfigs.length > 0) {
+                currentMonitorMap[monitors.length + ""] = currentMonitorMap[allConfigs[allConfigs.length - 1].toString()];
+            } else {
+                currentMonitorMap[monitors.length + ""] = monitors.length > 0 ? monitors[0].get_connector() : "";
+            }
         }
         let index = monitors.map(m => { return m.get_connector() }).indexOf(currentMonitorMap[monitors.length + ""]);
         if (index == -1) {
@@ -893,14 +945,22 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         function refreshLayoutDropdowns() {
             const savedLandscapeIdx = layoutLandscapeDrop.selected;
             const savedPortraitIdx = layoutPortraitDrop.selected;
+            const savedAltLandscape = layoutAltLandscapeDrop.model?.get_string(layoutAltLandscapeDrop.selected);
+            const savedAltPortrait = layoutAltPortraitDrop.model?.get_string(layoutAltPortraitDrop.selected);
+
             let newLayoutList = Object.keys(layouts);
             for (let i = 0; i < customLayouts.length; i++) {
                 newLayoutList.push("Custom Layout " + (i + 1));
             }
             layoutLandscapeDrop.set_model(Gtk.StringList.new(newLayoutList));
             layoutPortraitDrop.set_model(Gtk.StringList.new(newLayoutList));
+            layoutAltLandscapeDrop.set_model(Gtk.StringList.new(newLayoutList));
+            layoutAltPortraitDrop.set_model(Gtk.StringList.new(newLayoutList));
+
             layoutLandscapeDrop.selected = Math.min(savedLandscapeIdx, newLayoutList.length - 1);
             layoutPortraitDrop.selected = Math.min(savedPortraitIdx, newLayoutList.length - 1);
+            layoutAltLandscapeDrop.selected = Math.max(0, newLayoutList.indexOf(savedAltLandscape));
+            layoutAltPortraitDrop.selected = Math.max(0, newLayoutList.indexOf(savedAltPortrait));
         }
 
         // Function to add a layout box
@@ -1172,6 +1232,9 @@ export default class GjsOskPreferences extends ExtensionPreferences {
             }
             settings.set_string("default-monitor", representation.join(";"))
             settings.set_boolean("system-accent-col", systemAccColEnabled.active)
+            settings.set_string("layout-toggle-alt-landscape", layoutAltLandscapeDrop.model?.get_string(layoutAltLandscapeDrop.selected) ?? layoutList[0]);
+            settings.set_string("layout-toggle-alt-portrait", layoutAltPortraitDrop.model?.get_string(layoutAltPortraitDrop.selected) ?? layoutList[0]);
+            settings.set_boolean("enable-layout-toggle-button", layoutToggleEnableDT.active);
         })
     }
 };
