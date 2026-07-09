@@ -669,6 +669,7 @@ class Keyboard extends Dialog {
         this.capsL = false;
         this.shift = false;
         this.alt = false;
+        this._pendingAutoCap = false;
         this.opened = false;
         this.state = State.CLOSED;
         this.delta = [];
@@ -924,6 +925,7 @@ class Keyboard extends Dialog {
     }
 
     open(noPrep = null, instant = null) {
+        let wasClosed = !this.opened;
         if (this.updateCapsLock) this.updateCapsLock()
         if (this.updateNumLock) this.updateNumLock()
         if (noPrep == null || !noPrep) {
@@ -968,6 +970,13 @@ class Keyboard extends Dialog {
                 })
             }
             this.opened = true;
+            // Capitalize the first letter typed after the keyboard opens for a
+            // field (sentence start). Gated on wasClosed so a mid-typing reopen
+            // (e.g. a refresh) doesn't inject a stray capital.
+            if (wasClosed && this.settings.get_boolean("capitalize-first-letter")) {
+                this._pendingAutoCap = false;
+                this._armAutoShift();
+            }
             // [insert handwriting 5]
         }
     }
@@ -1639,6 +1648,28 @@ class Keyboard extends Dialog {
                 item.space_motion_handler = null;
             }
         })
+        // Release any modifier still held by the virtual device (e.g. an armed but
+        // unused auto-capitalize shift) so it isn't stranded pressed after the
+        // keyboard hides, which would otherwise leak into the physical keyboard.
+        // Guarded because the constructor calls close() before this state exists.
+        if (this.mod) {
+            for (const code of this.mod) {
+                try {
+                    this.inputDevice.notify_key(Clutter.get_current_event_time(), code, Clutter.KeyState.RELEASED);
+                } catch (e) { }
+            }
+            this.mod = [];
+        }
+        if (this.modBtns) {
+            this.modBtns.forEach(b => b.remove_style_class_name("selected"));
+            this.modBtns = [];
+        }
+        if (this.shiftButtons)
+            this.shiftButtons.forEach(b => b.remove_style_class_name("selected"));
+        this.shift = false;
+        this.alt = false;
+        this._pendingAutoCap = false;
+        if (this.updateKeyLabels) this.updateKeyLabels();
     }
     sendKey(keys) {
         try {
@@ -1682,6 +1713,15 @@ class Keyboard extends Dialog {
         } else if (i.code == 58 || i.code == 69) {
             this.sendKey([mBtn.char.code]);
         } else {
+            let autoCap = this.settings.get_boolean("auto-capitalize");
+            let glyph = null;
+            if (autoCap) {
+                // Character this key produces on the layer that's active right now,
+                // before resetAllMod() clears the modifiers below.
+                let layer = (this.alt ? 'alt' : '') + (this.shift ? 'shift' : '') + (this.numsL ? 'num' : '') + (this.capsL ? 'caps' : '') + (this.numsL || this.capsL ? 'lock' : '')
+                if (layer == '') layer = 'default'
+                glyph = i.layers ? i.layers[layer] : null;
+            }
             this.mod.push(i.code);
             this.sendKey(this.mod);
             this.mod = [];
@@ -1691,6 +1731,37 @@ class Keyboard extends Dialog {
             this.shiftButtons.forEach(i => { i.remove_style_class_name("selected") })
             this.resetAllMod();
             this.modBtns = [];
+            if (autoCap) {
+                this._updateAutoShift(i.code, glyph);
+            }
+        }
+    }
+
+    // Sentence-case helper: arm a one-shot shift so the next letter is
+    // capitalised after a sentence terminator + space, or after a newline.
+    _updateAutoShift(code, glyph) {
+        const SPACE = 57, ENTER = 28;
+        const terminators = [".", "!", "?", ":"];
+        if (code === ENTER) {
+            this._pendingAutoCap = false;
+            this._armAutoShift();
+        } else if (typeof glyph === "string" && terminators.includes(glyph)) {
+            // Wait for the following space so tokens like "e.g." or "3.14" aren't
+            // treated as sentence ends.
+            this._pendingAutoCap = true;
+        } else if (code === SPACE) {
+            if (this._pendingAutoCap) this._armAutoShift();
+            this._pendingAutoCap = false;
+        } else {
+            this._pendingAutoCap = false;
+        }
+    }
+
+    _armAutoShift() {
+        // Reuse the on-screen shift, which already auto-clears after one key.
+        // Skip when shift/caps are already engaged or the layout has no shift key.
+        if (!this.shift && !this.capsL && this.shiftButtons.length > 0) {
+            this.setShift(this.shiftButtons[0]);
         }
     }
 
