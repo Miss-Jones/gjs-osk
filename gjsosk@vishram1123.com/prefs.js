@@ -584,6 +584,32 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         enableKeyRepeatRow.add_suffix(enableKeyRepeatDT);
         enableKeyRepeatRow.activatable_widget = enableKeyRepeatDT;
 
+        const autoCapitalizeRow = new Adw.ActionRow({
+            title: _('Auto-capitalize'),
+            subtitle: _('Shift the next letter after . ! ? : or a new line')
+        });
+        behaviorGroup.add(autoCapitalizeRow);
+        const autoCapitalizeDT = new Gtk.Switch({
+            active: settings.get_boolean('auto-capitalize'),
+            valign: Gtk.Align.CENTER,
+        });
+
+        autoCapitalizeRow.add_suffix(autoCapitalizeDT);
+        autoCapitalizeRow.activatable_widget = autoCapitalizeDT;
+
+        const capitalizeFirstRow = new Adw.ActionRow({
+            title: _('Capitalize first letter'),
+            subtitle: _('Shift the first letter typed after a text field is focused')
+        });
+        behaviorGroup.add(capitalizeFirstRow);
+        const capitalizeFirstDT = new Gtk.Switch({
+            active: settings.get_boolean('capitalize-first-letter'),
+            valign: Gtk.Align.CENTER,
+        });
+
+        capitalizeFirstRow.add_suffix(capitalizeFirstDT);
+        capitalizeFirstRow.activatable_widget = capitalizeFirstDT;
+
         const soundPlayRow = new Adw.ExpanderRow({
             title: _('Play sound'),
             show_enable_switch: true
@@ -1177,6 +1203,8 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         settings.bind("snap-spacing-px", numChanger_snap, "value", 0)
         settings.bind("round-key-corners", roundKeyCDT, "active", 0);
         settings.bind("enable-key-repeat", enableKeyRepeatDT, "active", 0);
+        settings.bind("auto-capitalize", autoCapitalizeDT, "active", 0);
+        settings.bind("capitalize-first-letter", capitalizeFirstDT, "active", 0);
         settings.bind("key-repeat-rate", numChanger_keyRepeat, "value", 0);
         settings.bind("play-sound", soundPlayRow, "enable-expansion", 0);
         settings.bind("show-icons", showIconDT, "active", 0)

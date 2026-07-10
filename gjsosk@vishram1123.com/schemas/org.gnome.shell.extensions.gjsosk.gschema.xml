@@ -115,6 +115,12 @@
     <key name="layout-toggled-portrait" type="b">
       <default>false</default>
     </key>
+    <key name="auto-capitalize" type="b">
+	    <default>false</default>
+    </key>
+    <key name="capitalize-first-letter" type="b">
+	    <default>false</default>
+    </key>
     <child name="indicator" schema="org.gnome.shell.extensions.gjsosk.indicator"/>
   </schema>
   <schema id="org.gnome.shell.extensions.gjsosk.indicator" path="/org/gnome/shell/extensions/gjsosk/indicator/">
