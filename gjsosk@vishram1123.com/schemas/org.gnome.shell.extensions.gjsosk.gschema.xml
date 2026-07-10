@@ -121,6 +121,9 @@
     <key name="capitalize-first-letter" type="b">
 	    <default>false</default>
     </key>
+    <key name="saved-position" type="s">
+      <default>""</default>
+    </key>
     <child name="indicator" schema="org.gnome.shell.extensions.gjsosk.indicator"/>
   </schema>
   <schema id="org.gnome.shell.extensions.gjsosk.indicator" path="/org/gnome/shell/extensions/gjsosk/indicator/">

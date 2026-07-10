@@ -4,6 +4,7 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
+import Meta from 'gi://Meta';
 
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -112,7 +113,7 @@ export default class GjsOskExtension extends Extension {
         }
     }
 
-    _toggleKeyboard(instant = false) {
+    _toggleKeyboard(instant = false, userAction = false) {
         if (!this.Keyboard.opened) {
             this._openKeyboard(instant);
             this.Keyboard.openedFromButton = true;
@@ -121,6 +122,11 @@ export default class GjsOskExtension extends Extension {
             this._closeKeyboard(instant);
             this.Keyboard.openedFromButton = false;
             this.Keyboard.closedFromButton = true;
+            // Only a genuine user toggle-off (the panel button) forgets the dragged
+            // position. The keyboard-visible sync path also lands here on auto-close,
+            // so it must NOT clear — hence the userAction gate.
+            if (userAction)
+                this.settings.set_string("saved-position", "");
         }
     }
 
@@ -444,12 +450,12 @@ export default class GjsOskExtension extends Extension {
             this._indicator.add_child(icon);
             this._indicator.clear_actions();
             this._indicator.connect("button-press-event", () => {
-                this._toggleKeyboard();
+                this._toggleKeyboard(false, true);
                 return Clutter.EVENT_STOP;
             });
             this._indicator.connect("touch-event", (_actor, event) => {
                 if (event.type() == Clutter.EventType.TOUCH_END) {
-                    this._toggleKeyboard();
+                    this._toggleKeyboard(false, true);
                     return Clutter.EVENT_STOP;
                 }
                 return Clutter.EVENT_PROPAGATE;
@@ -495,7 +501,15 @@ export default class GjsOskExtension extends Extension {
         if (this.openBit.get_boolean('keyboard-visible') && this.Keyboard) {
             this._openKeyboard(true);
         }
-        let settingsChanged = () => {
+        let settingsChanged = (_source, key) => {
+            // The keyboard writes its dragged position back into settings; that must
+            // not trigger a full rebuild/reopen (which would itself reset position).
+            if (key === "saved-position")
+                return;
+            // Changing the default snap slot is an explicit "put it here" action, so
+            // drop any remembered drag position and honour the new slot.
+            if (key === "default-snap")
+                this.settings.set_string("saved-position", "");
             if (this.darkSchemeSettings.get_string("color-scheme") == "prefer-dark")
                 this.settings.scheme = "-dark"
             else
@@ -516,9 +530,9 @@ export default class GjsOskExtension extends Extension {
                 });
                 this._indicator.add_child(icon);
 
-                this._indicator.connect("button-press-event", () => this._toggleKeyboard());
+                this._indicator.connect("button-press-event", () => this._toggleKeyboard(false, true));
                 this._indicator.connect("touch-event", (_actor, event) => {
-                    if (event.type() == Clutter.EventType.TOUCH_END) this._toggleKeyboard()
+                    if (event.type() == Clutter.EventType.TOUCH_END) this._toggleKeyboard(false, true)
                 });
                 Main.panel.addToStatusArea("GJS OSK Indicator", this._indicator);
             } else {
@@ -619,6 +633,29 @@ export default class GjsOskExtension extends Extension {
 
 // [insert handwriting 3]
 
+// Monitor-relative resting position of the keyboard. Defaults to the slot
+// selected by "default-snap", but a position saved from a manual drag takes
+// precedence so the keyboard stays where the user put it across re-opens and
+// refreshes instead of snapping back to the default slot. Kept as a plain
+// function rather than a Keyboard method: the instance's methods are wrapped
+// into async error-handling proxies after construction, which would turn the
+// returned array into a Promise and break the [posX, posY] destructuring.
+function computeRestPosition(settings, width, height, monitor) {
+    let posX = [settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((width * .5))), monitor.width - width - settings.get_int("snap-spacing-px")][(settings.get_int("default-snap") % 3)];
+    let posY = [settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((height * .5))), monitor.height - height - settings.get_int("snap-spacing-px")][Math.floor((settings.get_int("default-snap") / 3))];
+    let saved = settings.get_string("saved-position");
+    if (saved) {
+        let parts = saved.split(";").map(Number);
+        if (parts.length == 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+            // Clamp into the current monitor so a saved position from a larger
+            // or differently-arranged monitor can't strand the keyboard off-screen.
+            posX = Math.max(0, Math.min(parts[0], monitor.width - width));
+            posY = Math.max(0, Math.min(parts[1], monitor.height - height));
+        }
+    }
+    return [posX, posY];
+}
+
 class Keyboard extends Dialog {
     static [GObject.signals] = {
         'drag-begin': {},
@@ -631,6 +668,8 @@ class Keyboard extends Dialog {
 
     _init(settings, extensionObject) {
         this.settingsOpenFunction = extensionObject.openPrefs
+        this.extensionObject = extensionObject;
+        this._unredirectInhibited = false;
         this.inputDevice = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
         this.settings = settings;
         this.customLayouts = extensionObject.customLayouts;
@@ -770,6 +809,7 @@ class Keyboard extends Dialog {
     }
 
     destroy() {
+        this._uninhibitUnredirect();
         Main.keyboard.maybeHandleEvent = this._oldMaybeHandleEvent
         if (this.oldBottomDragAction !== null && this.oldBottomDragAction instanceof Clutter.Action && EdgeDragAction != null) {
             global.stage.remove_action_by_name('osk')
@@ -854,6 +894,11 @@ class Keyboard extends Dialog {
                 this.delta = [];
                 this.emit('drag-end');
                 this._dragging = false;
+                // Persist where the user dropped the keyboard (monitor-relative) so
+                // re-opens, refreshes and focus changes restore this spot instead of
+                // snapping back to the default slot.
+                let monitor = Main.layoutManager.monitors[currentMonitorId] ?? Main.layoutManager.primaryMonitor;
+                this.settings.set_string("saved-position", (this.translation_x - monitor.x) + ";" + (this.translation_y - monitor.y));
             }
             this.draggable = false;
             return Clutter.EVENT_STOP;
@@ -898,10 +943,37 @@ class Keyboard extends Dialog {
         this.set_translation(xPos + monitor.x, yPos + monitor.y, 0);
     }
 
+    // Drop any remembered drag position so the next open returns to the
+    // default-snap slot. Called when the user explicitly dismisses the keyboard.
+    forgetPosition() {
+        this.settings.set_string("saved-position", "");
+    }
+
+    _inhibitUnredirect() {
+        if (this._unredirectInhibited) return;
+        try {
+            if (global.compositor && typeof global.compositor.disable_unredirect === 'function')
+                global.compositor.disable_unredirect();
+            else if (typeof Meta.disable_unredirect_for_display === 'function')
+                Meta.disable_unredirect_for_display(global.display);
+            this._unredirectInhibited = true;
+        } catch (e) { }
+    }
+
+    _uninhibitUnredirect() {
+        if (!this._unredirectInhibited) return;
+        try {
+            if (global.compositor && typeof global.compositor.enable_unredirect === 'function')
+                global.compositor.enable_unredirect();
+            else if (typeof Meta.enable_unredirect_for_display === 'function')
+                Meta.enable_unredirect_for_display(global.display);
+        } catch (e) { }
+        this._unredirectInhibited = false;
+    }
+
     setOpenState(percent) {
         let monitor = this.getMonitor();
-        let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
-        let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
+        let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
         let mX = [-this.box.width, 0, this.box.width][(this.settings.get_int("default-snap") % 3)];
         let mY = [-this.box.height, 0, this.box.height][Math.floor((this.settings.get_int("default-snap") / 3))]
         let [dx, dy] = [posX + mX * ((100 - percent) / 100) + monitor.x, posY + mY * ((100 - percent) / 100) + monitor.y]
@@ -923,8 +995,7 @@ class Keyboard extends Dialog {
         }
         if (noPrep == null || noPrep) {
             let monitor = this.getMonitor();
-            let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
-            let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
+            let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
             if (noPrep == null) {
                 let mX = [-this.box.width, 0, this.box.width][(this.settings.get_int("default-snap") % 3)];
                 let mY = [-this.box.height, 0, this.box.height][Math.floor((this.settings.get_int("default-snap") / 3))]
@@ -957,6 +1028,10 @@ class Keyboard extends Dialog {
                 })
             }
             this.opened = true;
+            // Stop the compositor from bypassing composition (direct scan-out) for a
+            // fullscreen window while the keyboard is up; otherwise the OSK keeps
+            // working but is never drawn on top (e.g. Firefox fullscreen).
+            this._inhibitUnredirect();
             // Capitalize the first letter typed after the keyboard opens for a
             // field (sentence start). Gated on wasClosed so a mid-typing reopen
             // (e.g. a refresh) doesn't inject a stray capital.
@@ -971,8 +1046,7 @@ class Keyboard extends Dialog {
     close(instant = null) {
         this.prevKeyFocus = null;
         let monitor = this.getMonitor();
-        let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
-        let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
+        let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
         let mX = [-this.box.width, 0, this.box.width][(this.settings.get_int("default-snap") % 3)];
         let mY = [-this.box.height, 0, this.box.height][Math.floor((this.settings.get_int("default-snap") / 3))]
         this.state = State.CLOSING
@@ -1006,6 +1080,7 @@ class Keyboard extends Dialog {
         }
         this.openedFromButton = false
         this.releaseAllKeys();
+        this._uninhibitUnredirect();
         // [insert handwrting 6]
     }
 
@@ -1360,11 +1435,13 @@ class Keyboard extends Dialog {
                 closeBtn.connect("button-press-event", () => {
                     this.close();
                     this.closedFromButton = true;
+                    this.forgetPosition();
                 })
                 closeBtn.connect("touch-event", () => {
                     if (Clutter.get_current_event().type() == Clutter.EventType.TOUCH_BEGIN) {
                         this.close();
                         this.closedFromButton = true;
+                        this.forgetPosition();
                     }
                 })
                 this.keys.push(closeBtn);
@@ -1472,11 +1549,13 @@ class Keyboard extends Dialog {
                 closeBtn.connect("button-press-event", () => {
                     this.close();
                     this.closedFromButton = true;
+                    this.forgetPosition();
                 });
                 closeBtn.connect("touch-event", () => {
                     if (Clutter.get_current_event().type() == Clutter.EventType.TOUCH_BEGIN) {
                         this.close();
                         this.closedFromButton = true;
+                        this.forgetPosition();
                     }
                 });
 
@@ -1860,7 +1939,13 @@ class Keyboard extends Dialog {
             if (key.char != undefined) {
                 let layer = (this.alt ? 'alt' : '') + (this.shift ? 'shift' : '') + (this.numsL ? 'num' : '') + (this.capsL ? 'caps' : '') + (this.numsL || this.capsL ? 'lock' : '')
                 if (layer == '') layer = 'default'
-                key.label = key.char.layers[layer];
+                // Fall back to the default layer when this key has no glyph for the
+                // active modifier combination, otherwise the label would be cleared
+                // to undefined and the key would render blank until a known layer
+                // is selected again. (Icon keys keep null on every layer by design.)
+                let label = key.char.layers[layer];
+                if (label === undefined) label = key.char.layers['default'];
+                key.label = label;
             }
         });
     }
