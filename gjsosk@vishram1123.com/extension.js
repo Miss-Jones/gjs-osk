@@ -956,7 +956,7 @@ class Keyboard extends Dialog {
                 this.inputDevice = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
             this.state = State.OPENING
             this.show();
-            Main.uiGroup.set_child_above_sibling(this, null);
+            this.get_parent()?.set_child_above_sibling(this, null);
         }
         if (noPrep == null || noPrep) {
             if (major >= 48) {
@@ -1001,7 +1001,7 @@ class Keyboard extends Dialog {
                 this._pendingAutoCap = false;
                 this._armAutoShift();
             }
-            Main.uiGroup.set_child_above_sibling(this, null);
+            this.get_parent()?.set_child_above_sibling(this, null);
             // [insert handwriting 5]
         }
     }
