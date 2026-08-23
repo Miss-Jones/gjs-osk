@@ -122,9 +122,6 @@ export default class GjsOskExtension extends Extension {
             this._closeKeyboard(instant);
             this.Keyboard.openedFromButton = false;
             this.Keyboard.closedFromButton = true;
-            // Only a genuine user toggle-off (the panel button) forgets the dragged
-            // position. The keyboard-visible sync path also lands here on auto-close,
-            // so it must NOT clear — hence the userAction gate.
             if (userAction)
                 this.settings.set_string("saved-position", "");
         }
@@ -499,12 +496,8 @@ export default class GjsOskExtension extends Extension {
             this._openKeyboard(true);
         }
         let settingsChanged = (_source, key) => {
-            // The keyboard writes its dragged position back into settings; that must
-            // not trigger a full rebuild/reopen (which would itself reset position).
             if (key === "saved-position")
                 return;
-            // Changing the default snap slot is an explicit "put it here" action, so
-            // drop any remembered drag position and honour the new slot.
             if (key === "default-snap")
                 this.settings.set_string("saved-position", "");
             if (this.darkSchemeSettings.get_string("color-scheme") == "prefer-dark")
@@ -624,13 +617,6 @@ export default class GjsOskExtension extends Extension {
 
 // [insert handwriting 3]
 
-// Monitor-relative resting position of the keyboard. Defaults to the slot
-// selected by "default-snap", but a position saved from a manual drag takes
-// precedence so the keyboard stays where the user put it across re-opens and
-// refreshes instead of snapping back to the default slot. Kept as a plain
-// function rather than a Keyboard method: the instance's methods are wrapped
-// into async error-handling proxies after construction, which would turn the
-// returned array into a Promise and break the [posX, posY] destructuring.
 function computeRestPosition(settings, width, height, monitor) {
     let posX = [settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((width * .5))), monitor.width - width - settings.get_int("snap-spacing-px")][(settings.get_int("default-snap") % 3)];
     let posY = [settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((height * .5))), monitor.height - height - settings.get_int("snap-spacing-px")][Math.floor((settings.get_int("default-snap") / 3))];
@@ -638,8 +624,6 @@ function computeRestPosition(settings, width, height, monitor) {
     if (saved) {
         let parts = saved.split(";").map(Number);
         if (parts.length == 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
-            // Clamp into the current monitor so a saved position from a larger
-            // or differently-arranged monitor can't strand the keyboard off-screen.
             posX = Math.max(0, Math.min(parts[0], monitor.width - width));
             posY = Math.max(0, Math.min(parts[1], monitor.height - height));
         }
@@ -889,9 +873,6 @@ class Keyboard extends Dialog {
                 this.delta = [];
                 this.emit('drag-end');
                 this._dragging = false;
-                // Persist where the user dropped the keyboard (monitor-relative) so
-                // re-opens, refreshes and focus changes restore this spot instead of
-                // snapping back to the default slot.
                 let monitor = Main.layoutManager.monitors[currentMonitorId] ?? Main.layoutManager.primaryMonitor;
                 this.settings.set_string("saved-position", (this.translation_x - monitor.x) + ";" + (this.translation_y - monitor.y));
             }
@@ -938,8 +919,6 @@ class Keyboard extends Dialog {
         this.set_translation(xPos + monitor.x, yPos + monitor.y, 0);
     }
 
-    // Drop any remembered drag position so the next open returns to the
-    // default-snap slot. Called when the user explicitly dismisses the keyboard.
     forgetPosition() {
         this.settings.set_string("saved-position", "");
     }
@@ -1028,9 +1007,6 @@ class Keyboard extends Dialog {
                 })
             }
             this.opened = true;
-            // Stop the compositor from bypassing composition (direct scan-out) for a
-            // fullscreen window while the keyboard is up; otherwise the OSK keeps
-            // working but is never drawn on top (e.g. Firefox fullscreen).
             this._inhibitUnredirect();
             Main.uiGroup.set_child_above_sibling(this, null);
             // [insert handwriting 5]
@@ -1817,10 +1793,6 @@ class Keyboard extends Dialog {
             if (key.char != undefined) {
                 let layer = (this.alt ? 'alt' : '') + (this.shift ? 'shift' : '') + (this.numsL ? 'num' : '') + (this.capsL ? 'caps' : '') + (this.numsL || this.capsL ? 'lock' : '')
                 if (layer == '') layer = 'default'
-                // Fall back to the default layer when this key has no glyph for the
-                // active modifier combination, otherwise the label would be cleared
-                // to undefined and the key would render blank until a known layer
-                // is selected again. (Icon keys keep null on every layer by design.)
                 let label = key.char.layers[layer];
                 if (label === undefined) label = key.char.layers['default'];
                 key.label = label;
