@@ -959,9 +959,6 @@ class Keyboard extends Dialog {
                 })
             }
             this.opened = true;
-            // Capitalize the first letter typed after the keyboard opens for a
-            // field (sentence start). Gated on wasClosed so a mid-typing reopen
-            // (e.g. a refresh) doesn't inject a stray capital.
             if (wasClosed && this.settings.get_boolean("capitalize-first-letter")) {
                 this._pendingAutoCap = false;
                 this._armAutoShift();
@@ -1638,10 +1635,6 @@ class Keyboard extends Dialog {
                 item.space_motion_handler = null;
             }
         })
-        // Release any modifier still held by the virtual device (e.g. an armed but
-        // unused auto-capitalize shift) so it isn't stranded pressed after the
-        // keyboard hides, which would otherwise leak into the physical keyboard.
-        // Guarded because the constructor calls close() before this state exists.
         if (this.mod) {
             for (const code of this.mod) {
                 try {
@@ -1710,8 +1703,6 @@ class Keyboard extends Dialog {
             let autoCap = this.settings.get_boolean("auto-capitalize");
             let glyph = null;
             if (autoCap) {
-                // Character this key produces on the layer that's active right now,
-                // before resetAllMod() clears the modifiers below.
                 let layer = (this.alt ? 'alt' : '') + (this.shift ? 'shift' : '') + (this.numsL ? 'num' : '') + (this.capsL ? 'caps' : '') + (this.numsL || this.capsL ? 'lock' : '')
                 if (layer == '') layer = 'default'
                 glyph = i.layers ? i.layers[layer] : null;
@@ -1731,8 +1722,6 @@ class Keyboard extends Dialog {
         }
     }
 
-    // Sentence-case helper: arm a one-shot shift so the next letter is
-    // capitalised after a sentence terminator + space, or after a newline.
     _updateAutoShift(code, glyph) {
         const SPACE = 57, ENTER = 28;
         const terminators = [".", "!", "?", ":"];
@@ -1740,8 +1729,6 @@ class Keyboard extends Dialog {
             this._pendingAutoCap = false;
             this._armAutoShift();
         } else if (typeof glyph === "string" && terminators.includes(glyph)) {
-            // Wait for the following space so tokens like "e.g." or "3.14" aren't
-            // treated as sentence ends.
             this._pendingAutoCap = true;
         } else if (code === SPACE) {
             if (this._pendingAutoCap) this._armAutoShift();
@@ -1752,8 +1739,6 @@ class Keyboard extends Dialog {
     }
 
     _armAutoShift() {
-        // Reuse the on-screen shift, which already auto-clears after one key.
-        // Skip when shift/caps are already engaged or the layout has no shift key.
         if (!this.shift && !this.capsL && this.shiftButtons.length > 0) {
             this.setShift(this.shiftButtons[0]);
         }
