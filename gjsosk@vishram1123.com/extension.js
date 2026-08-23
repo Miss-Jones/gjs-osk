@@ -463,21 +463,6 @@ export default class GjsOskExtension extends Extension {
         Main.panel.statusArea.quickSettings.addExternalIndicator(this._quick_settings_indicator);
         this.open_interval();
 
-        this._sleepWatchId = Gio.DBus.system.signal_subscribe(
-            'org.freedesktop.login1',
-            'org.freedesktop.login1.Manager',
-            'PrepareForSleep',
-            '/org/freedesktop/login1',
-            null,
-            Gio.DBusSignalFlags.NONE,
-            (_conn, _sender, _path, _iface, _signal, params) => {
-                const [aboutToSleep] = params.deep_unpack();
-                if (!aboutToSleep) {
-                    this._onWake();
-                }
-            }
-        );
-
         this.keyboardVisibilityHandler = this.openBit.connect('changed::keyboard-visible', () => {
             const shouldBeVisible = this.openBit.get_boolean('keyboard-visible');
             if (shouldBeVisible !== this.Keyboard?.opened) {
@@ -561,11 +546,6 @@ export default class GjsOskExtension extends Extension {
     }
 
     disable() {
-        if (this._sleepWatchId) {
-            Gio.DBus.system.signal_unsubscribe(this._sleepWatchId);
-            this._sleepWatchId = null;
-        }
-
         this.gnomeKeyboardSettings.disconnect(this.isGnomeKeyboardEnabledHandler)
         this.gnomeKeyboardSettings.set_boolean('screen-keyboard-enabled', this.isGnomeKeyboardEnabled);
 
@@ -603,8 +583,7 @@ export default class GjsOskExtension extends Extension {
         if (this._toggle !== null) {
             try {
                 this._toggle.destroy()
-            } catch (e) {
-            }
+            } catch { }
             this._toggle = null
         }
         this.settings = null
@@ -769,6 +748,9 @@ class Keyboard extends Dialog {
     }
 
     destroy() {
+        if (major >= 48) {
+            global.display.get_compositor().enable_unredirect()
+        }
         Main.keyboard.maybeHandleEvent = this._oldMaybeHandleEvent
         if (this.oldBottomDragAction !== null && this.oldBottomDragAction instanceof Clutter.Action && EdgeDragAction != null) {
             global.stage.remove_action_by_name('osk')
@@ -913,13 +895,20 @@ class Keyboard extends Dialog {
         if (this.updateCapsLock) this.updateCapsLock()
         if (this.updateNumLock) this.updateNumLock()
         if (noPrep == null || !noPrep) {
+            if (major >= 48) {
+                global.display.get_compositor().disable_unredirect()
+            }
             this.prevKeyFocus = global.stage.key_focus
             if (!this.inputDevice)
                 this.inputDevice = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
             this.state = State.OPENING
             this.show();
+            Main.uiGroup.set_child_above_sibling(this, null);
         }
         if (noPrep == null || noPrep) {
+            if (major >= 48) {
+                global.display.get_compositor().disable_unredirect()
+            }
             let monitor = this.getMonitor();
             let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
             let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
@@ -955,6 +944,7 @@ class Keyboard extends Dialog {
                 })
             }
             this.opened = true;
+            Main.uiGroup.set_child_above_sibling(this, null);
             // [insert handwriting 5]
         }
     }
@@ -1720,6 +1710,10 @@ class Keyboard extends Dialog {
     }
 
     decideMod(i, mBtn) {
+        if (!i) return;
+        const needsButton = [29, 56, 97, 125, 126, 100, 42, 54, 58, 69].includes(i.code);
+        if (needsButton && (!mBtn || !mBtn.char)) return;
+
         if (i.code == 29 || i.code == 56 || i.code == 97 || i.code == 125 || i.code == 126) {
             this.setNormMod(mBtn);
         } else if (i.code == 100) {
@@ -1764,6 +1758,7 @@ class Keyboard extends Dialog {
     }
 
     setAlt(button) {
+        if (!button || !button.char) return;
         this.alt = !this.alt;
         this.updateKeyLabels();
         if (!this.alt) {
@@ -1773,6 +1768,7 @@ class Keyboard extends Dialog {
     }
 
     setShift(button) {
+        if (!button || button.char == undefined) return;
         this.shift = !this.shift;
         this.updateKeyLabels();
         if (!this.shift) {
@@ -1796,6 +1792,7 @@ class Keyboard extends Dialog {
 
 
     setNormMod(button) {
+        if (!button || button.char == undefined) return;
         if (this.mod.includes(button.char.code)) {
             this.mod.splice(this.mod.indexOf(button.char.code), this.mod.indexOf(button.char.code) + 1);
             if (!(button.char.code == 42) && !(button.char.code == 54))
