@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Deploy & Switch User",
+            "type": "node",
+            "request": "launch",
+            "runtimeExecutable": "sudo",
+            "runtimeArgs": [
+                "/home/jonashr/Extensions/linux-surface-extension-utils/switch.sh"
+            ],
+            "preLaunchTask": "Install Extension"
+        }
+    ]
+}
