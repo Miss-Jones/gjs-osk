@@ -617,6 +617,7 @@ export default class GjsOskExtension extends Extension {
 
 // [insert handwriting 3]
 
+// Plain function, not a Keyboard method: methods get wrapped in async proxies after construction, which would make this return a Promise.
 function computeRestPosition(settings, width, height, monitor) {
     let posX = [settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((width * .5))), monitor.width - width - settings.get_int("snap-spacing-px")][(settings.get_int("default-snap") % 3)];
     let posY = [settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((height * .5))), monitor.height - height - settings.get_int("snap-spacing-px")][Math.floor((settings.get_int("default-snap") / 3))];
