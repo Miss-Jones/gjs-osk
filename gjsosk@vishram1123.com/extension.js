@@ -112,7 +112,7 @@ export default class GjsOskExtension extends Extension {
         }
     }
 
-    _toggleKeyboard(instant = false) {
+    _toggleKeyboard(instant = false, userAction = false) {
         if (!this.Keyboard.opened) {
             this._openKeyboard(instant);
             this.Keyboard.openedFromButton = true;
@@ -121,6 +121,8 @@ export default class GjsOskExtension extends Extension {
             this._closeKeyboard(instant);
             this.Keyboard.openedFromButton = false;
             this.Keyboard.closedFromButton = true;
+            if (userAction)
+                this.settings.set_string("saved-position", "");
         }
     }
 
@@ -456,12 +458,12 @@ export default class GjsOskExtension extends Extension {
             this._indicator.add_child(icon);
             this._indicator.clear_actions();
             this._indicator.connect("button-press-event", () => {
-                this._toggleKeyboard();
+                this._toggleKeyboard(false, true);
                 return Clutter.EVENT_STOP;
             });
             this._indicator.connect("touch-event", (_actor, event) => {
                 if (event.type() == Clutter.EventType.TOUCH_END) {
-                    this._toggleKeyboard();
+                    this._toggleKeyboard(false, true);
                     return Clutter.EVENT_STOP;
                 }
                 return Clutter.EVENT_PROPAGATE;
@@ -492,7 +494,11 @@ export default class GjsOskExtension extends Extension {
         if (this.openBit.get_boolean('keyboard-visible') && this.Keyboard) {
             this._openKeyboard(true);
         }
-        let settingsChanged = () => {
+        let settingsChanged = (_source, key) => {
+            if (key === "saved-position")
+                return;
+            if (key === "default-snap")
+                this.settings.set_string("saved-position", "");
             if (this.darkSchemeSettings.get_string("color-scheme") == "prefer-dark")
                 this.settings.scheme = "-dark"
             else
@@ -513,9 +519,9 @@ export default class GjsOskExtension extends Extension {
                 });
                 this._indicator.add_child(icon);
 
-                this._indicator.connect("button-press-event", () => this._toggleKeyboard());
+                this._indicator.connect("button-press-event", () => this._toggleKeyboard(false, true));
                 this._indicator.connect("touch-event", (_actor, event) => {
-                    if (event.type() == Clutter.EventType.TOUCH_END) this._toggleKeyboard()
+                    if (event.type() == Clutter.EventType.TOUCH_END) this._toggleKeyboard(false, true)
                 });
                 Main.panel.addToStatusArea("GJS OSK Indicator", this._indicator);
             } else {
@@ -609,6 +615,21 @@ export default class GjsOskExtension extends Extension {
 }
 
 // [insert handwriting 3]
+
+// Plain function, not a Keyboard method: methods get wrapped in async proxies after construction, which would make this return a Promise.
+function computeRestPosition(settings, width, height, monitor) {
+    let posX = [settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((width * .5))), monitor.width - width - settings.get_int("snap-spacing-px")][(settings.get_int("default-snap") % 3)];
+    let posY = [settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((height * .5))), monitor.height - height - settings.get_int("snap-spacing-px")][Math.floor((settings.get_int("default-snap") / 3))];
+    let saved = settings.get_string("saved-position");
+    if (saved) {
+        let parts = saved.split(";").map(Number);
+        if (parts.length == 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])) {
+            posX = Math.max(0, Math.min(parts[0], monitor.width - width));
+            posY = Math.max(0, Math.min(parts[1], monitor.height - height));
+        }
+    }
+    return [posX, posY];
+}
 
 class Keyboard extends Dialog {
     static [GObject.signals] = {
@@ -849,6 +870,8 @@ class Keyboard extends Dialog {
                 this.delta = [];
                 this.emit('drag-end');
                 this._dragging = false;
+                let monitor = Main.layoutManager.monitors[currentMonitorId] ?? Main.layoutManager.primaryMonitor;
+                this.settings.set_string("saved-position", (this.translation_x - monitor.x) + ";" + (this.translation_y - monitor.y));
             }
             this.draggable = false;
             return Clutter.EVENT_STOP;
@@ -893,10 +916,13 @@ class Keyboard extends Dialog {
         this.set_translation(xPos + monitor.x, yPos + monitor.y, 0);
     }
 
+    forgetPosition() {
+        this.settings.set_string("saved-position", "");
+    }
+
     setOpenState(percent) {
         let monitor = Main.layoutManager.monitors[currentMonitorId] ?? Main.layoutManager.primaryMonitor;
-        let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
-        let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
+        let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
         let mX = [-this.box.width, 0, this.box.width][(this.settings.get_int("default-snap") % 3)];
         let mY = [-this.box.height, 0, this.box.height][Math.floor((this.settings.get_int("default-snap") / 3))]
         let [dx, dy] = [posX + mX * ((100 - percent) / 100) + monitor.x, posY + mY * ((100 - percent) / 100) + monitor.y]
@@ -923,8 +949,7 @@ class Keyboard extends Dialog {
                 global.display.get_compositor().disable_unredirect()
             }
             let monitor = Main.layoutManager.monitors[currentMonitorId] ?? Main.layoutManager.primaryMonitor;
-            let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
-            let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
+            let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
             if (noPrep == null) {
                 let mX = [-this.box.width, 0, this.box.width][(this.settings.get_int("default-snap") % 3)];
                 let mY = [-this.box.height, 0, this.box.height][Math.floor((this.settings.get_int("default-snap") / 3))]
@@ -965,8 +990,7 @@ class Keyboard extends Dialog {
     close(instant = null) {
         this.prevKeyFocus = null;
         let monitor = Main.layoutManager.monitors[currentMonitorId] ?? Main.layoutManager.primaryMonitor;
-        let posX = [this.settings.get_int("snap-spacing-px"), ((monitor.width * .5) - ((this.width * .5))), monitor.width - this.width - this.settings.get_int("snap-spacing-px")][(this.settings.get_int("default-snap") % 3)];
-        let posY = [this.settings.get_int("snap-spacing-px"), ((monitor.height * .5) - ((this.height * .5))), monitor.height - this.height - this.settings.get_int("snap-spacing-px")][Math.floor((this.settings.get_int("default-snap") / 3))];
+        let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
         let mX = [-this.box.width, 0, this.box.width][(this.settings.get_int("default-snap") % 3)];
         let mY = [-this.box.height, 0, this.box.height][Math.floor((this.settings.get_int("default-snap") / 3))]
         this.state = State.CLOSING
@@ -1310,11 +1334,13 @@ class Keyboard extends Dialog {
                 closeBtn.connect("button-press-event", () => {
                     this.close();
                     this.closedFromButton = true;
+                    this.forgetPosition();
                 })
                 closeBtn.connect("touch-event", () => {
                     if (Clutter.get_current_event().type() == Clutter.EventType.TOUCH_BEGIN) {
                         this.close();
                         this.closedFromButton = true;
+                        this.forgetPosition();
                     }
                 })
                 gridRight.attach(closeBtn, (rowSize - 2 * topBtnWidth), 0, 2 * topBtnWidth, 3)
@@ -1415,11 +1441,13 @@ class Keyboard extends Dialog {
                 closeBtn.connect("button-press-event", () => {
                     this.close();
                     this.closedFromButton = true;
+                    this.forgetPosition();
                 })
                 closeBtn.connect("touch-event", () => {
                     if (Clutter.get_current_event().type() == Clutter.EventType.TOUCH_BEGIN) {
                         this.close();
                         this.closedFromButton = true;
+                        this.forgetPosition();
                     }
                 })
                 grid.attach(closeBtn, (rowSize - 2 * topBtnWidth), 0, 2 * topBtnWidth, 3)
