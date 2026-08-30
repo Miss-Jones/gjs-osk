@@ -29,4 +29,4 @@ Two new keys, both booleans defaulting to false: `auto-capitalize` and `capitali
 - Focus an empty field and confirm the first letter capitalizes.
 - Open then close the keyboard without typing, then check Shift isn't stuck on your hardware keyboard.
 
-Tested on GNOME <fill in> (Wayland).
+Tested on GNOME 50.4 (Wayland).
