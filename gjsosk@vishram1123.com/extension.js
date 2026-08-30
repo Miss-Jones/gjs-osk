@@ -4,7 +4,6 @@ import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
-import Meta from 'gi://Meta';
 
 
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
@@ -633,7 +632,6 @@ class Keyboard extends Dialog {
     _init(settings, extensionObject) {
         this.settingsOpenFunction = extensionObject.openPrefs
         this.extensionObject = extensionObject;
-        this._unredirectInhibited = false;
         this.inputDevice = Clutter.get_default_backend().get_default_seat().create_virtual_device(Clutter.InputDeviceType.KEYBOARD_DEVICE);
         this.settings = settings;
         this.customLayouts = extensionObject.customLayouts;
@@ -773,7 +771,6 @@ class Keyboard extends Dialog {
     }
 
     destroy() {
-        this._uninhibitUnredirect();
         if (major >= 48) {
             global.display.get_compositor().enable_unredirect()
         }
@@ -911,28 +908,6 @@ class Keyboard extends Dialog {
         this.settings.set_string("saved-position", "");
     }
 
-    _inhibitUnredirect() {
-        if (this._unredirectInhibited) return;
-        try {
-            if (global.compositor && typeof global.compositor.disable_unredirect === 'function')
-                global.compositor.disable_unredirect();
-            else if (typeof Meta.disable_unredirect_for_display === 'function')
-                Meta.disable_unredirect_for_display(global.display);
-            this._unredirectInhibited = true;
-        } catch (e) { }
-    }
-
-    _uninhibitUnredirect() {
-        if (!this._unredirectInhibited) return;
-        try {
-            if (global.compositor && typeof global.compositor.enable_unredirect === 'function')
-                global.compositor.enable_unredirect();
-            else if (typeof Meta.enable_unredirect_for_display === 'function')
-                Meta.enable_unredirect_for_display(global.display);
-        } catch (e) { }
-        this._unredirectInhibited = false;
-    }
-
     setOpenState(percent) {
         let monitor = this.getMonitor();
         let [posX, posY] = computeRestPosition(this.settings, this.width, this.height, monitor);
@@ -997,7 +972,6 @@ class Keyboard extends Dialog {
                 })
             }
             this.opened = true;
-            this._inhibitUnredirect();
             if (wasClosed && this.settings.get_boolean("capitalize-first-letter")) {
                 this._pendingAutoCap = false;
                 this._armAutoShift();
@@ -1044,7 +1018,6 @@ class Keyboard extends Dialog {
         }
         this.openedFromButton = false
         this.releaseAllKeys();
-        this._uninhibitUnredirect();
         // [insert handwrting 6]
     }
 
