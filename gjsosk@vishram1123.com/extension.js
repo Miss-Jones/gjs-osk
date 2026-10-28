@@ -1847,7 +1847,17 @@ class Keyboard extends Dialog {
 
     // Terminals take commands, not sentences
     _autoCapitalizeAllowed() {
-        return Main.inputMethod.content_purpose != Clutter.InputContentPurpose.TERMINAL;
+        if (Main.inputMethod.content_purpose != Clutter.InputContentPurpose.TERMINAL)
+            return true;
+        // Unless the terminal window's title matches, e.g. a chat app running inside it
+        const pattern = this.settings.get_string("auto-capitalize-terminal-titles");
+        if (pattern === "")
+            return false;
+        try {
+            return new RegExp(pattern, "i").test(global.display.focus_window?.get_title() ?? "");
+        } catch (e) {
+            return false;
+        }
     }
 
     _armAutoShift() {

@@ -610,6 +610,12 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         capitalizeFirstRow.add_suffix(capitalizeFirstDT);
         capitalizeFirstRow.activatable_widget = capitalizeFirstDT;
 
+        const capitalizeTerminalTitlesRow = new Adw.EntryRow({
+            title: _('Terminal windows that still auto-capitalize (title regex)'),
+            text: settings.get_string('auto-capitalize-terminal-titles'),
+        });
+        behaviorGroup.add(capitalizeTerminalTitlesRow);
+
         const soundPlayRow = new Adw.ExpanderRow({
             title: _('Play sound'),
             show_enable_switch: true
@@ -1205,6 +1211,7 @@ export default class GjsOskPreferences extends ExtensionPreferences {
         settings.bind("enable-key-repeat", enableKeyRepeatDT, "active", 0);
         settings.bind("auto-capitalize", autoCapitalizeDT, "active", 0);
         settings.bind("capitalize-first-letter", capitalizeFirstDT, "active", 0);
+        settings.bind("auto-capitalize-terminal-titles", capitalizeTerminalTitlesRow, "text", 0);
         settings.bind("key-repeat-rate", numChanger_keyRepeat, "value", 0);
         settings.bind("play-sound", soundPlayRow, "enable-expansion", 0);
         settings.bind("show-icons", showIconDT, "active", 0)

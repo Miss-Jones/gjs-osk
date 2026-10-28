@@ -121,6 +121,9 @@
     <key name="capitalize-first-letter" type="b">
 	    <default>false</default>
     </key>
+    <key name="auto-capitalize-terminal-titles" type="s">
+	    <default>""</default>
+    </key>
     <key name="saved-position" type="s">
       <default>""</default>
     </key>
