@@ -116,11 +116,9 @@ export default class GjsOskExtension extends Extension {
         if (!this.Keyboard.opened) {
             this._openKeyboard(instant);
             this.Keyboard.openedFromButton = true;
-            this.Keyboard.closedFromButton = false
         } else {
             this._closeKeyboard(instant);
             this.Keyboard.openedFromButton = false;
-            this.Keyboard.closedFromButton = true;
             if (userAction)
                 this.settings.set_string("saved-position", "");
         }
@@ -150,6 +148,8 @@ export default class GjsOskExtension extends Extension {
     open_interval() {
         if (this.tapConnect && GObject.signal_handler_is_connected(global.stage, this.tapConnect))
             global.stage.disconnect(this.tapConnect)
+        if (this.panelStateConnect && GObject.signal_handler_is_connected(Main.inputMethod, this.panelStateConnect))
+            Main.inputMethod.disconnect(this.panelStateConnect)
         if (this.openInterval !== null) {
             clearInterval(this.openInterval);
             this.openInterval = null;
@@ -169,14 +169,9 @@ export default class GjsOskExtension extends Extension {
                 if (this.Keyboard.get_child_at_index(this.Keyboard.get_n_children() - 1) !== this.Keyboard.box)
                     this.Keyboard.set_child_at_index(this.Keyboard.box, this.Keyboard.get_n_children() - 1);
 
-                if (!this.Keyboard.openedFromButton && this.lastInputMethod) {
-                    if (Main.inputMethod.currentFocus != null && Main.inputMethod.currentFocus.is_focused() && !this.Keyboard.closedFromButton) {
-                        this._openKeyboard();
-                    } else if (!this.Keyboard.closedFromButton && !this.Keyboard._dragging) {
+                if (!this.Keyboard.openedFromButton && this.lastInputMethod && !this.Keyboard._dragging) {
+                    if (Main.inputMethod.currentFocus == null || !Main.inputMethod.currentFocus.is_focused()) {
                         this._closeKeyboard();
-                        this.Keyboard.closedFromButton = false
-                    } else if (Main.inputMethod.currentFocus == null) {
-                        this.Keyboard.closedFromButton = false
                     }
                 }
             }
@@ -185,13 +180,15 @@ export default class GjsOskExtension extends Extension {
             if (event.type() !== 4 && event.type() !== 5) {
                 this.lastInputMethod = [false, event.type() >= 9 && event.type() <= 12, true][this.settings.get_int("enable-tap-gesture")]
             }
-            // Reset close-suppression on a fresh tap outside the keyboard
-            if ((event.type() == Clutter.EventType.TOUCH_BEGIN || event.type() == Clutter.EventType.BUTTON_PRESS)
-                && this.Keyboard != null && this.Keyboard.closedFromButton) {
-                const actor = global.stage.get_event_actor(event);
-                if (actor == null || !this.Keyboard.contains(actor)) {
-                    this.Keyboard.closedFromButton = false;
-                }
+        })
+        // Open when the app asks for an input panel (e.g. a tap into a text field), not whenever a field merely holds focus
+        this.panelStateConnect = Main.inputMethod.connect("input-panel-state", (_im, state) => {
+            if (this.Keyboard == null || this.Keyboard.openedFromButton || !this.lastInputMethod)
+                return;
+            if (state == Clutter.InputPanelState.OFF || (Main.inputMethod.content_hints & Clutter.InputContentHintFlags.INHIBIT_OSK)) {
+                this._closeKeyboard();
+            } else {
+                this._openKeyboard();
             }
         })
     }
@@ -590,6 +587,7 @@ export default class GjsOskExtension extends Extension {
         }
         this.openBit = null;
         global.stage.disconnect(this.tapConnect)
+        Main.inputMethod.disconnect(this.panelStateConnect)
         if (this.openInterval !== null) {
             clearInterval(this.openInterval);
             this.openInterval = null;
@@ -706,14 +704,12 @@ class Keyboard extends Dialog {
                 oskEdgeDragAction.connect('activated', () => {
                     this.open(true);
                     this.openedFromButton = true;
-                    this.closedFromButton = false;
                     this.gestureInProgress = false;
                 });
                 oskEdgeDragAction.connect('gesture-cancel', () => {
                     if (this.gestureInProgress) {
                         this.close()
                         this.openedFromButton = false;
-                        this.closedFromButton = true;
                     }
                     this.gestureInProgress = false;
                     return Clutter.EVENT_PROPAGATE;
@@ -739,14 +735,12 @@ class Keyboard extends Dialog {
                 oskEdgeDragAction.connect('end', () => {
                     this.open(true);
                     this.openedFromButton = true;
-                    this.closedFromButton = false;
                     this.gestureInProgress = false;
                 });
                 oskEdgeDragAction.connect('cancel', () => {
                     if (this.gestureInProgress) {
                         this.close()
                         this.openedFromButton = false;
-                        this.closedFromButton = true;
                     }
                     this.gestureInProgress = false;
                     return Clutter.EVENT_PROPAGATE;
@@ -1379,13 +1373,11 @@ class Keyboard extends Dialog {
                 closeBtn.add_style_class_name("key")
                 closeBtn.connect("button-press-event", () => {
                     this.close();
-                    this.closedFromButton = true;
                     this.forgetPosition();
                 })
                 closeBtn.connect("touch-event", () => {
                     if (Clutter.get_current_event().type() == Clutter.EventType.TOUCH_BEGIN) {
                         this.close();
-                        this.closedFromButton = true;
                         this.forgetPosition();
                     }
                 })
@@ -1493,13 +1485,11 @@ class Keyboard extends Dialog {
                 closeBtn.add_style_class_name("key")
                 closeBtn.connect("button-press-event", () => {
                     this.close();
-                    this.closedFromButton = true;
                     this.forgetPosition();
                 });
                 closeBtn.connect("touch-event", () => {
                     if (Clutter.get_current_event().type() == Clutter.EventType.TOUCH_BEGIN) {
                         this.close();
-                        this.closedFromButton = true;
                         this.forgetPosition();
                     }
                 });
