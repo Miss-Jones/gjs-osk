@@ -2,6 +2,7 @@ import Clutter from 'gi://Clutter';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Meta from 'gi://Meta';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
 
@@ -122,6 +123,22 @@ export default class GjsOskExtension extends Extension {
         }
     }
 
+    // Terminals never request an input panel, so a tap on a focused terminal window opens the keyboard instead
+    _openForTerminalTap() {
+        const tap = this._terminalTap;
+        if (tap == null || this.Keyboard == null)
+            return;
+        if (GLib.get_monotonic_time() - tap.time > 1000000) {
+            this._terminalTap = null;
+            return;
+        }
+        const focus = Main.inputMethod.currentFocus;
+        if (focus != null && focus.is_focused() && global.display.focus_window === tap.window
+            && Main.inputMethod.content_purpose == Clutter.InputContentPurpose.TERMINAL) {
+            this._terminalTap = null;
+            this._openKeyboard();
+        }
+    }
 
     _rebuildToggle() {
         try {
@@ -159,6 +176,7 @@ export default class GjsOskExtension extends Extension {
                 }
                 this.Keyboard.get_parent().set_child_at_index(this.Keyboard, this.Keyboard.get_parent().get_n_children() - 1);
                 this.Keyboard.set_child_at_index(this.Keyboard.box, this.Keyboard.get_n_children() - 1);
+                this._openForTerminalTap();
                 if (!this.Keyboard.openedFromButton && this.lastInputMethod && !this.Keyboard._dragging) {
                     if (Main.inputMethod.currentFocus == null || !Main.inputMethod.currentFocus.is_focused()) {
                         this._closeKeyboard();
@@ -169,6 +187,21 @@ export default class GjsOskExtension extends Extension {
         this.tapConnect = global.stage.connect("event", (_actor, event) => {
             if (event.type() !== 4 && event.type() !== 5) {
                 this.lastInputMethod = [false, event.type() >= 9 && event.type() <= 12, true][this.settings.get_int("enable-tap-gesture")]
+            }
+            if (event.type() == Clutter.EventType.BUTTON_PRESS || event.type() == Clutter.EventType.TOUCH_BEGIN) {
+                let actor = global.stage.get_event_actor(event);
+                while (actor != null && !(actor instanceof Meta.WindowActor))
+                    actor = actor.get_parent();
+                this._press = actor == null ? null : { coords: event.get_coords(), window: actor.get_meta_window() };
+            } else if ((event.type() == Clutter.EventType.BUTTON_RELEASE || event.type() == Clutter.EventType.TOUCH_END) && this._press != null) {
+                const [x, y] = event.get_coords();
+                const [pressX, pressY] = this._press.coords;
+                // Only a tap counts; drags and touch scrolls move further than this
+                if (this.lastInputMethod && Math.abs(x - pressX) < 16 && Math.abs(y - pressY) < 16) {
+                    this._terminalTap = { window: this._press.window, time: GLib.get_monotonic_time() };
+                    this._openForTerminalTap();
+                }
+                this._press = null;
             }
         })
         // Open when the app asks for an input panel (e.g. a tap into a text field), not whenever a field merely holds focus
